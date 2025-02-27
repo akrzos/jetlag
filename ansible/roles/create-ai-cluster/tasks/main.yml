@@ -22,45 +22,123 @@
   set_fact:
     static_network_config: []
 
-- name: Populate static network configuration with controlplane nodes
-  include_tasks: static_network_config.yml
-  loop: "{{ groups['controlplane'] }}"
+- name: SNO Cluster Creation
+  block:
+  - name: SNO - RH Lab Populate static network configuration
+    set_fact:
+      static_network_config:
+      - network_yaml: "{{ lookup('template', 'nmstate.yml.j2') }}"
+        mac_interface_map: "{{ lookup('template', 'mac_interface_map.json.j2')  }}"
+    when:
+    - lab in rh_labs
+    # - use_bastion_registry
 
-- name: MNO - Populate static network configuration with worker nodes
-  include_tasks: static_network_config.yml
+  - name: SNO - Cloud Lab Populate static network configuration
+    set_fact:
+      static_network_config:
+      - network_yaml: "{{ lookup('template', 'ibmcloud_nmstate.yml.j2') }}"
+        mac_interface_map: "{{ lookup('template', 'ibmcloud_mac_interface_map.json.j2')  }}"
+    when:
+    - lab in cloud_labs
+
+  - debug:
+      msg: "{{ static_network_config }}"
+
+  - name: SNO - Set cluster_name
+    set_fact:
+      cluster_name: "{{ groups['sno'][0] }}"
+
+  - name: SNO - Set machine network cidr for non-lab dhcp networks
+    set_fact:
+      machine_network_cidr: "{{ controlplane_network | ipaddr('network/prefix') }}"
+    when: not sno_use_lab_dhcp
+
+  - name: SNO - Set machine network cidr for lab DHCP network
+    block:
+    - name: Set machine network
+      set_fact:
+        machine_network: "{{ hostvars[groups['sno'][0]].ip }}/{{ hostvars[groups['sno'][0]].network_prefix }}"
+
+    - name: Set machine network CIDR
+      set_fact:
+        machine_network_cidr: "{{ machine_network | ipaddr('network/prefix') }}"
+    when: sno_use_lab_dhcp
+
+  # - name: Update machine CIDR
+  #   uri:
+  #     url: "http://{{ assisted_installer_host }}:{{ assisted_installer_port }}/api/assisted-install/v2/clusters/{{ ai_cluster_id }}"
+  #     method: PATCH
+  #     body_format: json
+  #     status_code: [201]
+  #     return_content: true
+  #     body: {
+  #         "machine_network_cidr": "{{ machine_network_cidr }}"
+  #     }
+
+  - name: Create SNO cluster
+    uri:
+      url: "http://{{ assisted_installer_host }}:{{ assisted_installer_port }}/api/assisted-install/v2/clusters"
+      method: POST
+      body_format: json
+      status_code: [201]
+      return_content: true
+      body: {
+          "name": "{{ cluster_name }}",
+          "openshift_version": "{{ openshift_version }}",
+          "high_availability_mode": "None",
+          "base_dns_domain": "{{ base_dns_name }}",
+          "cluster_network_cidr": "{{ cluster_network_cidr }}",
+          "cluster_network_host_prefix": "{{ cluster_network_host_prefix }}",
+          "service_network_cidr": "{{ service_network_cidr }}",
+          "pull_secret": "{{ pull_secret | to_json }}",
+          "ssh_public_key": "{{ lookup('file', ssh_public_key_file) }}",
+          "additional_ntp_source": "{{ bastion_controlplane_ip if (lab in cloud_labs) or use_bastion_registry else labs[lab]['ntp_server'] }}"
+      }
+    register: create_cluster_return
+  when:
+  - cluster_type == "sno"
+
+- name: MNO Cluster Creation
+  block:
+  - name: MNO - Populate static network configuration with controlplane nodes
+    include_tasks: static_network_config.yml
+    loop: "{{ groups['controlplane'] }}"
+
+  - name: MNO - Populate static network configuration with worker nodes
+    include_tasks: static_network_config.yml
+    loop: "{{ groups['worker'] }}"
+
+  - name: Create MNO cluster
+    uri:
+      url: "http://{{ assisted_installer_host }}:{{ assisted_installer_port }}/api/assisted-install/v2/clusters"
+      method: POST
+      body_format: json
+      status_code: [201]
+      return_content: true
+      body: {
+          "name": "{{ cluster_name }}",
+          "openshift_version": "{{ openshift_version }}",
+          "base_dns_domain": "{{ base_dns_name }}",
+          "cluster_network_cidr": "{{ cluster_network_cidr }}",
+          "cluster_network_host_prefix": "{{ cluster_network_host_prefix }}",
+          "service_network_cidr": "{{ service_network_cidr }}",
+          "pull_secret": "{{ pull_secret | to_json }}",
+          "ssh_public_key": "{{ lookup('file', ssh_public_key_file) }}",
+          "vip_dhcp_allocation": "{{ vip_dhcp_allocation }}",
+          "additional_ntp_source": "{{ bastion_controlplane_ip if use_bastion_registry else labs[lab]['ntp_server'] }}",
+          "api_vips": [{"ip": "{{ controlplane_network_api }}"}],
+          "ingress_vips": [{"ip": "{{ controlplane_network_ingress }}"}],
+          "network_type": "OVNKubernetes"
+      }
+    register: create_cluster_return
   when:
   - cluster_type == "mno"
-  loop: "{{ groups['worker'] }}"
-
-- name: Create MNO cluster
-  uri:
-    url: "http://{{ assisted_installer_host }}:{{ assisted_installer_port }}/api/assisted-install/v2/clusters"
-    method: POST
-    body_format: json
-    status_code: [201]
-    return_content: true
-    body: {
-        "name": "{{ cluster_name }}",
-        "openshift_version": "{{ openshift_version }}",
-        "base_dns_domain": "{{ base_dns_name }}",
-        "cluster_network_cidr": "{{ cluster_network_cidr }}",
-        "cluster_network_host_prefix": "{{ cluster_network_host_prefix }}",
-        "service_network_cidr": "{{ service_network_cidr }}",
-        "pull_secret": "{{ pull_secret | to_json }}",
-        "ssh_public_key": "{{ lookup('file', ssh_public_key_file) }}",
-        "vip_dhcp_allocation": "{{ vip_dhcp_allocation }}",
-        "additional_ntp_source": "{{ bastion_controlplane_ip if use_bastion_registry else labs[lab]['ntp_server'] }}",
-        "api_vips": [{"ip": "{{ controlplane_network_api }}"}],
-        "ingress_vips": [{"ip": "{{ controlplane_network_ingress }}"}],
-        "network_type": "OVNKubernetes"
-    }
-  register: create_cluster_return
 
 - name: Set ai_cluster_id
   set_fact:
     ai_cluster_id: "{{ create_cluster_return.json.id }}"
 
-- name: Patch cluster network settings
+- name: MNO - Patch cluster network settings
   uri:
     url: "http://{{ assisted_installer_host }}:{{ assisted_installer_port }}/api/assisted-install/v2/clusters/{{ ai_cluster_id }}"
     method: PATCH
@@ -82,6 +160,8 @@
           }
         ]
     }
+  when:
+  - cluster_type == "mno"
 
 - name: Create a connected infra-env
   uri:
