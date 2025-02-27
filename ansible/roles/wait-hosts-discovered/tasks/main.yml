@@ -6,16 +6,10 @@
     inventory_nodes: "{{ groups['controlplane'] + groups['worker'] }}"
   when: cluster_type == "mno"
 
-- name: SNO - Create list of nodes to be discovered
+- name: SNO - Set the list of one node to be discovered
   set_fact:
     inventory_nodes: "{{ groups['sno'] }}"
   when: cluster_type == "sno"
-
-- name: Assert that inventory_nodes is defined
-  ansible.builtin.assert:
-    that: inventory_nodes is defined
-    quiet: true
-    fail_msg: "Unsupported cluster type {{ cluster_type }}"
 
 - name: Wait up to 40 min for nodes to be discovered
   uri:
@@ -50,12 +44,27 @@
     return_content: true
   register: cluster
 
-- name: Set hostname and role for discovered hosts
+- name: MNO - Set hostname and role for each node
   include_tasks: set_hostname_role.yml
   loop: "{{ cluster.json.hosts }}"
   loop_control:
     loop_var: discovered_host
     label: "{{ discovered_host.id }}"
+  when: cluster_type == "mno"
+
+- name: SNO - Set hostname and role
+  uri:
+    url: "http://{{ assisted_installer_host }}:{{ assisted_installer_port }}/api/assisted-install/v2/infra-envs/{{ ai_infraenv_id }}/hosts/{{ cluster.json.hosts[0].id }}"
+    method: PATCH
+    body_format: json
+    status_code: [201]
+    return_content: true
+    body: {
+        "host_name": "{{ groups['sno'][0] }}",
+        "host_role": "master"
+    }
+  no_log: true
+  when: cluster_type == "sno"
 
 - name: Wait for cluster to be ready
   uri:
@@ -72,16 +81,15 @@
   include_tasks: set_node_install_disk.yml
   loop: "{{ cluster.json.hosts | selectattr('role', 'eq', 'master') | list }}"
   loop_control:
-    loop_var: mno_node
-    label: "{{ mno_node.requested_hostname }}"
+    loop_var: node
+    label: "{{ node.requested_hostname }}"
 
 - name: Set install disk for worker nodes
   include_tasks: set_node_install_disk.yml
   loop: "{{ cluster.json.hosts | selectattr('role', 'eq', 'worker') | list }}"
   loop_control:
-    loop_var: mno_node
-    label: "{{ mno_node.requested_hostname }}"
-
+    loop_var: node
+    label: "{{ node.requested_hostname }}"
 
 - name: Wait for cluster to be ready for install
   uri:
