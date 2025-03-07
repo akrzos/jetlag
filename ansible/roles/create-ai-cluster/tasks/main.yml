@@ -194,9 +194,11 @@
   when: use_bastion_registry | default(false)
 
 # Disable lab interface manifests, skip if SNO has sno_use_lab_dhcp=true
-- name: Include custom manifests to disable the lab interface
+- name: Include custom manifests to disable the lab interface (RH Labs & BYOL)
   include_tasks: 01_manifest_update.yml
-  when: (cluster_type == "mno") or (cluster_type == "sno" and not sno_use_lab_dhcp)
+  when:
+  - lab in rh_labs or lab == "byol"
+  - (cluster_type == "mno") or (cluster_type == "sno" and not sno_use_lab_dhcp)
   loop:
   - file_name: 50-controlplane-disable-lab-dhcp-interface.yaml
     template_name: 50-controlplane-disable-lab-dhcp-interface.yml.j2

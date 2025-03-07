@@ -14,10 +14,19 @@
   vars:
     assisted_installer_host: "{{ hostvars[inventory_hostname]['private_address'] }}"
     http_store_host: "{{ hostvars[inventory_hostname]['private_address'] }}"
+    sno_use_lab_dhcp: false
+    use_bastion_registry: false
+  pre_tasks:
+  - name: Validate deploying SNO
+    fail:
+      msg: "cluster_type is not 'sno'"
+    when: cluster_type != "sno"
   roles:
   - validate-vars
   - ocp-release
-  - ibmcloud-sno-create-ai-cluster
+  # - ibmcloud-sno-create-ai-cluster
+  # - ibmcloud-create-ai-cluster
+  - create-ai-cluster
   - role: generate-discovery-iso
     vars:
       iso_name: "{{ groups['sno'][1] }}"
