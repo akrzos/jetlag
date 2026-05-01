@@ -61,18 +61,18 @@ All variables are defined in `ansible/roles/configure-local-storage/defaults/mai
 
 ### LVM disks
 
-Disks listed in `controlplane_localstorage_lvm_devices` (or `worker_localstorage_device` for workers) are handled at node boot via an Ignition-embedded script:
+Disks listed in `controlplane_localstorage_lvm_devices` (or `worker_localstorage_lvm_devices` for workers) are handled at node boot via an Ignition-embedded script:
 
 1. Each disk is wiped and receives a partition labeled `LS0`, `LS1`, etc.
 2. All partitions are combined into a single LVM volume group `vg_ls`.
 3. A thin pool `lv_tp_ls` is created using 99% of the volume group.
 4. `controlplane_localstorage_lv_count` thin logical volumes (`lv_cp_tv00`, `lv_cp_tv01`, …) are carved from the pool at `controlplane_localstorage_lv_size` each.
 
-Setting `controlplane_localstorage_lvm_devices` to an empty list disables steps 1–4; the disks are still wiped but no partitions or LVM structures are created and no LVM LocalVolume is applied.
+Setting `controlplane_localstorage_lvm_devices` to an empty list disables steps 1–4.
 
 ### Plain disks
 
-Disks listed in `controlplane_localstorage_disk_devices` are wiped at node boot (`wipeTable: true`) with no partitions created. They are exposed directly to LSO as raw block devices via the `localvolume-disk` resource.
+Disks listed in `controlplane_localstorage_disk_devices` (or `worker_localstorage_disk_devices`) are wiped at node boot (`wipeTable: true`) with no partitions created. They are exposed directly to LSO as raw block devices via the `localvolume-disk` resource.
 
 ## LocalVolume resources
 
@@ -108,7 +108,7 @@ controlplane_localstorage_disk_devices:
   - /dev/disk/by-path/pci-0000:4a:00.0-scsi-0:0:3:0
 ```
 
-### Control-plane with LVM and disk disks
+### Control-plane with LVM and block disks
 
 LVM volumes on one disk, plus two additional raw disks exposed as block devices:
 
