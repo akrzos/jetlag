@@ -8,7 +8,10 @@ setup_bastion_object_store: false
 
 object_store_path: /opt/jetlag/rustfs
 object_store_image: quay.io/rustfs/rustfs
-object_store_image_tag: 1.0.0-rc.6
+# Pinned to a GA release (was 1.0.0-rc.6). The per-operation drive-timeout knobs
+# below require a current RustFS; a release-candidate is not recommended for a
+# fleet-scale object store.
+object_store_image_tag: 1.0.4
 object_store_access_key: rustfs
 object_store_secret_key: rustfs123
 object_store_port: 9000
@@ -17,3 +20,29 @@ object_store_console_port: 9001
 # /dev/disk/by-path/pci-0000:18:00.0-scsi-0:2:1:0) to partition, format as XFS,
 # and mount it at object_store_path/data. Empty string disables separate disk setup.
 object_store_data_disk: ""
+
+# RustFS scale / high-concurrency tuning
+#
+# This is a single-node RustFS instance that the entire managed-cluster fleet can
+# hit at once -- e.g. fleet-wide OADP/IBU backup upload and finalize-time cleanup
+# all land in a narrow window. Under that request stampede a healthy-but-busy
+# instance can be starved of file descriptors or have in-flight disk operations
+# tripped as stalled, surfacing on clients as S3 request failures / retry
+# exhaustion and OADP BackupStorageLocation "Unavailable" flaps. These settings
+# raise the OS and RustFS per-operation budgets so the instance rides out the
+# burst instead of failing requests.
+#
+# References:
+#   https://github.com/rustfs/rustfs/blob/main/docs/operations/drive-timeout-tuning.md
+#   https://docs.rustfs.com/en/operations/scaling
+
+# Container file-descriptor and process ulimits (soft and hard set equal). Each
+# concurrent S3 client holds several sockets/FDs; the container default (often
+# 1024) is far too low for fleet-scale concurrency.
+object_store_nofile_limit: 1048576
+object_store_nproc_limit: 65536
+
+# RustFS drive-timeout profile. "high_latency" widens every profile-aware
+# per-operation drive liveness budget to 60s so a busy disk under load is not
+# treated as a stalled drive. Set to "default" to restore built-in budgets.
+object_store_drive_timeout_profile: high_latency

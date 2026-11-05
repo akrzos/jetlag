@@ -85,9 +85,17 @@
     command:
     - -c
     - "mkdir -p /storage/thanos /storage/ibu /storage/dr4hub/velero && for i in $(seq -f \"%05g\" 1 4000); do mkdir -p \"/storage/vm$i-ibu\"; done && rustfs server /storage --console-address :{{ object_store_console_port }}"
+    # Raise file-descriptor and process limits so fleet-scale concurrent S3
+    # access is not capped by the low container defaults.
+    ulimit:
+    - "nofile={{ object_store_nofile_limit }}:{{ object_store_nofile_limit }}"
+    - "nproc={{ object_store_nproc_limit }}:{{ object_store_nproc_limit }}"
     env:
       RUSTFS_ACCESS_KEY: "{{ object_store_access_key }}"
       RUSTFS_SECRET_KEY: "{{ object_store_secret_key }}"
+      # Widen per-operation drive liveness budgets so a busy disk under a request
+      # stampede is not failed as a stalled drive.
+      RUSTFS_DRIVE_TIMEOUT_PROFILE: "{{ object_store_drive_timeout_profile }}"
     volume:
     - "{{ object_store_path }}/data:/storage:Z"
     state: started
